@@ -1,6 +1,6 @@
 name: Build Android APK
 
-# CI build on every push to main/develop.
+# CI build on every push to main/develop and on pull requests to main.
 # Uses the 'github' distribution channel (sideload APK).
 # For signing, the keystore secrets must be set in GitHub Settings → Secrets.
 # If secrets are absent (e.g. forks / PRs), the build falls back to debug signing.
@@ -15,17 +15,17 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    
+
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
-      
+
     - name: Setup Java
       uses: actions/setup-java@v4
       with:
         distribution: 'zulu'
         java-version: '17'
-        
+
     - name: Setup Flutter
       uses: subosito/flutter-action@v2
       with:
@@ -33,18 +33,18 @@ jobs:
         channel: 'stable'
         cache: true
 
-    # Set up release keystore when secrets are available.
-    # Falls back to debug signing automatically when key.properties is absent.
-
     - name: Get dependencies
       run: flutter pub get
-      
+
     - name: Analyze code
       run: flutter analyze --no-fatal-infos --no-fatal-warnings
-      
+
+    - name: Run tests
+      run: flutter test
+
     - name: Build APK (GitHub channel)
       run: flutter build apk --release --dart-define=DISTRIBUTION_CHANNEL=github
-      
+
     - name: Upload APK artifact
       uses: actions/upload-artifact@v4
       with:
