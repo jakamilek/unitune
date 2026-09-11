@@ -179,23 +179,51 @@ class _UniTuneAppState extends ConsumerState<UniTuneApp> {
     platform.setMethodCallHandler((call) async {
       if (call.method == 'onIntent') {
         final args = call.arguments as Map<dynamic, dynamic>;
-        final action = args['action'] as String? ?? '';
-        final data = args['data'] as String? ?? '';
-        final type = args['type'] as String? ?? '';
-
-        debugPrint('=== Native Intent Received ===');
-        debugPrint('Action: $action');
-        debugPrint('Data: $data');
-        debugPrint('Type: $type');
-
-        // Store the native action for later use
-        _lastNativeAction = action;
-        _lastNativeActionAt = DateTime.now();
-
-        // The actual link handling is done by flutter_sharing_intent and app_links
-        // We just store the action here to determine the correct mode later
+        _recordNativeIntent(args);
       }
     });
+
+    // The activity can receive its launch intent before Dart registers the
+    // handler above. Fetch the native buffer only after registration.
+    unawaited(_handleInitialNativeIntent());
+  }
+
+  Future<void> _handleInitialNativeIntent() async {
+    try {
+      final args = await platform.invokeMapMethod<String, dynamic>(
+        'getInitialIntent',
+      );
+      if (args == null) return;
+
+      _recordNativeIntent(args);
+      final action = args['action'] as String? ?? '';
+      final data = args['data'] as String? ?? '';
+
+      // app_links and flutter_sharing_intent retain their existing ownership of
+      // unitune links and ACTION_SEND. A launch ACTION_VIEW for a music URL must
+      // be processed explicitly because it may have arrived before their streams.
+      if (action == 'android.intent.action.VIEW' && _isMusicLink(data)) {
+        debugPrint('Processing buffered initial music link in OPEN mode: $data');
+        _handleMusicLink(data, ProcessingMode.open);
+      }
+    } on PlatformException catch (e) {
+      debugPrint('Error getting initial native intent: ${e.message}');
+    }
+  }
+
+  void _recordNativeIntent(Map<dynamic, dynamic> args) {
+    final action = args['action'] as String? ?? '';
+    final data = args['data'] as String? ?? '';
+    final type = args['type'] as String? ?? '';
+
+    debugPrint('=== Native Intent Received ===');
+    debugPrint('Action: $action');
+    debugPrint('Data: $data');
+    debugPrint('Type: $type');
+
+    // Store the native action for later use by the existing link handlers.
+    _lastNativeAction = action;
+    _lastNativeActionAt = DateTime.now();
   }
 
   /// Determines the correct processing mode based on native intent action
@@ -447,30 +475,30 @@ class _UniTuneAppState extends ConsumerState<UniTuneApp> {
 
       debugPrint('Deep link music URL: $link');
       debugPrint('Determined mode: $mode');
-
-      // Validate the URL before processing
-      final validationResult = UrlValidator.validateAndSanitize(link);
-      if (!validationResult.isValid) {
-        developer.log(
-          'URL validation failed',
-          name: 'URLValidation',
-          error: validationResult.errorMessage,
-        );
-        debugPrint('Invalid URL rejected: ${validationResult.errorMessage}');
-        _showErrorDialog(validationResult.errorMessage ?? 'Invalid URL');
-        return;
-      }
-
-      // Check duplicate with the determined mode
-      if (_shouldSkipDuplicate(validationResult.sanitizedUrl, mode)) {
-        debugPrint('=== Skipping duplicate deep link ($mode mode) ===');
-        return;
-      }
-
-      // Mark as handled and navigate
-      _markHandled(validationResult.sanitizedUrl, mode);
-      _navigateToProcessing(validationResult.sanitizedUrl, mode);
+      _handleMusicLink(link, mode);
     }
+  }
+
+  void _handleMusicLink(String link, ProcessingMode mode) {
+    final validationResult = UrlValidator.validateAndSanitize(link);
+    if (!validationResult.isValid) {
+      developer.log(
+        'URL validation failed',
+        name: 'URLValidation',
+        error: validationResult.errorMessage,
+      );
+      debugPrint('Invalid URL rejected: ${validationResult.errorMessage}');
+      _showErrorDialog(validationResult.errorMessage ?? 'Invalid URL');
+      return;
+    }
+
+    if (_shouldSkipDuplicate(validationResult.sanitizedUrl, mode)) {
+      debugPrint('=== Skipping duplicate deep link ($mode mode) ===');
+      return;
+    }
+
+    _markHandled(validationResult.sanitizedUrl, mode);
+    _navigateToProcessing(validationResult.sanitizedUrl, mode);
   }
 
   void _navigateToPlaylistImport(String playlistId) {

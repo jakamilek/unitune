@@ -11,6 +11,7 @@ import io.flutter.plugins.googlemobileads.GoogleMobileAdsPlugin
 class MainActivity : FlutterActivity() {
     private val CHANNEL = "de.unitune.unitune/intent"
     private var methodChannel: MethodChannel? = null
+    private var initialIntent: Map<String, String>? = null
     
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -24,11 +25,21 @@ class MainActivity : FlutterActivity() {
         
         // Create MethodChannel for intent action communication
         methodChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL)
+        methodChannel?.setMethodCallHandler { call, result ->
+            if (call.method == "getInitialIntent") {
+                result.success(initialIntent)
+            } else {
+                result.notImplemented()
+            }
+        }
     }
     
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        handleIntent(intent)
+        // Dart registers its MethodChannel handler after the activity is created.
+        // Keep the launch intent until Dart explicitly requests it so an initial
+        // ACTION_VIEW is not lost during application startup.
+        initialIntent = intentInfo(intent)
     }
     
     override fun onNewIntent(intent: Intent) {
@@ -38,25 +49,25 @@ class MainActivity : FlutterActivity() {
     }
     
     private fun handleIntent(intent: Intent?) {
-        if (intent == null) return
-        
-        val action = intent.action
-        val data = intent.data
-        val type = intent.type
+        val intentInfo = intentInfo(intent) ?: return
         
         Log.d("UniTune", "=== Native Intent Handler ===")
-        Log.d("UniTune", "Action: $action")
-        Log.d("UniTune", "Data: $data")
-        Log.d("UniTune", "Type: $type")
+        Log.d("UniTune", "Action: ${intentInfo["action"]}")
+        Log.d("UniTune", "Data: ${intentInfo["data"]}")
+        Log.d("UniTune", "Type: ${intentInfo["type"]}")
         
         // Send intent info to Flutter
-        val intentInfo = mapOf(
-            "action" to (action ?: ""),
-            "data" to (data?.toString() ?: ""),
-            "type" to (type ?: "")
-        )
-        
         methodChannel?.invokeMethod("onIntent", intentInfo)
+    }
+
+    private fun intentInfo(intent: Intent?): Map<String, String>? {
+        if (intent == null) return null
+
+        return mapOf(
+            "action" to (intent.action ?: ""),
+            "data" to (intent.data?.toString() ?: ""),
+            "type" to (intent.type ?: "")
+        )
     }
     
     override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
